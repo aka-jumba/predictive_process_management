@@ -10,14 +10,12 @@ Original file is located at
 import pandas as pd
 import numpy as np
 import keras
-from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
 from keras.models import Sequential
 from keras.layers import Dense, Embedding, LSTM, Dropout, Activation, Flatten
 from sklearn.model_selection import train_test_split
 from keras.utils.np_utils import to_categorical
 from keras.layers.normalization import BatchNormalization
-
 import sklearn
 from sklearn.utils import shuffle
 from datetime import datetime
@@ -28,108 +26,111 @@ import matplotlib.pyplot as plt
 
 #import the csv
 data = pd.read_csv('helpdesk.csv')
-np.sum(data.isna())
-# data['CompleteTimestamp'][0].day
-d = data
 
 #given the caseID, array 'numarray' outputs the number of events in  that particular caseID trace.
 caseS = pd.Series(data['CaseID'] )
-numarray = caseS.value_counts()
-print("Number of events in trace caseID 2 :" + str(a[2]))
-
-# outputs the number of traces where the number of events in the particular trace is the index of below Series(CaseID).
-# pd.value_counts(data['CaseID']).value_counts()
-
+numarray = caseS.value_counts()#this numarray will be used to iterate the panda(data) as it contains the number of events per trace
+numcaseID = pd.value_counts(data['CaseID']).value_counts()
+maxlen = max(numcaseID.index)#maxlen is the maximum number of events in a trace that was observed
 actS = pd.Series(data['ActivityID'] )
 actS.value_counts()
 classes = actS.max()
-#zero will be for end of trace
 print("number of classes(zero not included which will be denoted later as end of trace) :" +str(classes))
 
-#converting it into datetime datatype of pandas for easy access of date, time and other operations.
+#converting it into datetime datatype of pandas for easy access of date, time and other arithematic operations.
 data['datetime'] = pd.to_datetime(data['CompleteTimestamp'])
 data.drop(['CompleteTimestamp'], axis=1, inplace=True)
-# data.head()
 
 #set finds the unique numbers in caseID i.e list all the unique caseIDs.
-ca_uni = list(sorted(set(data['CaseID'].values)))
-ca_uni
-numarray[2]
-
-#datetime is shifted to find elapsed or concerned type of time further down the line.
-data['dapa'] = data['datetime'].shift(1)
-# data.head()
+#datetime is shifted using shift command to find elapsed
+# or concerned type of time further down the line.
+case_uniq = list(set(data['CaseID'].values))
+data['shiftedtime'] = data['datetime'].shift(1)
 
 #difference of datetime is timedelta type in pandas which has a function called .total_seconds()
-data['elapsed'] = data['datetime'] - data['dapa']
+data['elapsed'] = data['datetime'] - data['shiftedtime']
 elapsec = [x.total_seconds() for x in data['elapsed'] ]
-# data['elapsed'].head()
 data['elap'] = elapsec
-data.drop(columns=['elapsed','dapa'],inplace = True)
-# data.head(50)
+data.drop(columns=['elapsed','shiftedtime'],inplace = True)
+#at this point of time, the columns are caseID, activityID, timestamp and elapsed time
 
-# data.head(5)
-
-#case at all times denote the index of data panda, and ca_uni contains unique caseIDs, we increment case with a[i] amount i.e the number of events in that particular trace denoted by i (element of ca_uni).
+#for below loop, case at all times denote the index of data which is a panda, 
+#and case_uniq contains unique caseIDs, 
+#we increment case with numarray[i] amount i.e the number of events 
+#in that particular trace denoted by i (element of case_uniq).
 case = 0
-for i in ca_uni:
+for i in case_uniq:
   data.loc[case,'elap'] = 0
   case += numarray[ i ]
-  
-# data.head(10)
 
 #converted the seconds into days
-data['elap'] = data['elap']/86400
-# data.head()
+lis = [(x.hour*3600 + x.minute*60 + x.second) for x in data['datetime']]
+data['from_midnight']  =lis
 
+#with the help of data['from_midnight'].hist() 
+#we notice by below graphs that most stuff happened during the evening/night
+#we find the from_midnight and from_sun attributes using .weekday 
+#function of datetime object and converted everything into time(days) scale.
+li = [x.weekday()*86400 for x in data['datetime']]
+data['from_sun'] = li
+data['from_sun'] = (data['from_sun'] +  data['from_midnight'])/86400
+data['from_midnight'] = (data['from_midnight'])/86400
+data['elap'] = (data['elap'])/86400
+
+#we see that no event occurred on Sunday.
+print("Below is the compilation of information of all the data we have conjured.")
+print(data.describe())
+
+# with the help of np.sum(data.isna())
+# we see if any null values are there, the results were zero in all the columns 
+#the result was zero
+
+#we implement our first abstraction that is sequence
 #the trace is made into a string and named sequence abstraction
 case = 0
-for i in ca_uni:
+for i in case_uniq:
 #   data.loc[case,'elap'] = 0
   prev = data.loc[case,'ActivityID']
   prev = str(prev)
   data.loc[case,'seq'] =  prev
 #   print(prev)
   case +=1
-  for j in range(a[i]-1):
+  for j in range(numarray[i]-1):
     new = data.loc[case,'ActivityID']
     prev = prev + str(new)
     data.loc[case,'seq'] = prev
     case +=1
   
-# data.head(10)
-
-#bag abstraction is made
+#bag abstraction is made, the first line makes sure that the order is still the same
+ # but all the elements are unique since set is used
+ #third line append the frequency of each activity in a coded form 
+ #eg. <4,8,7,6,4,7,4> bag would be a string "caba4876"
+ #transition system is implemented in this way, it is a workaround 
 li = ["".join(sorted(set(st), key=st.index)) for st in data['seq'] ]
 data['bag'] = li
 count = ["".join( [chr(row['seq'].count(ch)+96) for ch in row['bag']] )+row['bag'] for index,row in data.iterrows()]
 data['bag'] = count
-# data.head(50)
 
 #set abstraction is made
-tra1 = ["".join(sorted(set(st), key=st.index)) for st in data['seq'] ]
-# tra2 = ["".join(sorted(st)) for st in tra1]
-data['set'] = tra1
-# data.head(20)
+temp = ["".join(sorted(set(st), key=st.index)) for st in data['seq'] ]
+data['set'] = temp
 
 #future activity and the future elapsed time is brought on the same row
 data['future'] = data['ActivityID'].shift(-1)
 data['future_elap'] = data['elap'].shift(-1)
-# data.head(20)
 
-#at the change of trace, values are adjusted
+#at the change of trace, values are adjusted, future activity is given special code 0 
 case = -1
-for i in ca_uni:
+for i in case_uniq:
   data.loc[case,'future'] = 0
   data.loc[case,'future_elap'] = 0
-#   print(i)
   case += numarray[ i ]
 
 data.dropna(inplace = True)
 
 """**PREFIX DECIDE**"""
 
-prefix = 6
+prefix = 2
 
 #actual_time contains future elapsed time, only the reasonable data rows are kept, rest are dropped
 actual_time = []
@@ -142,16 +143,13 @@ for index,row in data.iterrows():
 data.reset_index(inplace = True)
 
 till = int(data.shape[0]*0.80)
-# till
+till
 
 #data is separated for test and train 
 testdata = data.iloc[till:]
 data = data.iloc[:till]
 actual_time_train = actual_time[:till]
 actual_time_test = actual_time[till:]
-# list(actual_time)
-
-testdata.shape
 
 from statistics import mean
 from sklearn.metrics import mean_absolute_error
@@ -171,7 +169,8 @@ for index, row in data.iterrows():
     setdic[row['set']][1].append(row['elap'])
 
 setpred = {}
-
+#actunk is activity unknown
+#timeunk is time unknown
 # actunk and timeunk is found for unseen sequences if occurred, 
 # setpred first element is most occurred element and second element is average elapsed time
 actunk = []
@@ -181,12 +180,10 @@ for key, value in setdic.items():
   actunk.append(setpred[key][0])
   timeunk.append(setpred[key][1])
 
-# actunk
-
 #most often occurred activity is unkact
 unkact = max(actunk,key=actunk.count)
 
-# unktime is the mean of all time given
+# unktime is the mean of all time that has been come across
 unktime = mean(timeunk)
 
 #predact and predtime is prepared to predict future similar sequence if occured
@@ -200,10 +197,11 @@ for index, row in data.iterrows():
 actualact = list(data['future'])
 
 trainaccuracy = sum(1 for x,y in zip(predact,actualact) if x == y) / float(len(actualact))
-trainaccuracy
+print("Set activity accuracy for train data"+ str(trainaccuracy))
+
 
 trainmae =  mean_absolute_error(predtime,actual_time_train)
-trainmae
+print("Set time mean_absolute_error for train data"+ str(trainmae))
 
 #we predict by looking for similar occurrence of the test trace sequence, if new sequence is seen predict unktime unkact
 predact = []
@@ -222,12 +220,14 @@ for index, row in testdata.iterrows():
 actualact = list(testdata['future'])
 
 testaccuracy = sum(1 for x,y in zip(predact,actualact) if x == y) / float(len(actualact))
-testaccuracy
+print("Set activity accuracy for test data "+ str(testaccuracy))
 
 testmae =  mean_absolute_error(predtime,actual_time_test)
-testmae
+print("Set time mean_absolute_error for test data "+ str(testmae))
+
 
 """**SEQUENCE ABSTRACTION**"""
+# exact same approach is taken for sequence and bag abstraction
 
 seqdic= {}
 
@@ -264,10 +264,12 @@ for index, row in data.iterrows():
 actualact = list(data['future'])
 
 trainaccuracy = sum(1 for x,y in zip(predact,actualact) if x == y) / float(len(actualact))
-trainaccuracy
+print("Seq activity accuracy for train data "+ str(trainaccuracy))
+
 
 trainmae =  mean_absolute_error(predtime,actual_time_train)
-trainmae
+print("Seq time mean_absolute_error for train data "+ str(trainmae))
+
 
 len(predact)
 
@@ -293,10 +295,12 @@ for index, row in testdata.iterrows():
 actualact = list(testdata['future'])
 
 testaccuracy = sum(1 for x,y in zip(predact,actualact) if x == y) / float(len(actualact))
-testaccuracy
+print("Seq activity accuracy for test data "+ str(testaccuracy))
+
 
 testmae =  mean_absolute_error(predtime,actual_time_test)
-testmae
+print("Set time mean_absolute_error for test data "+ str(testmae))
+
 
 """**BAG ABSTRACTION**
 
@@ -338,10 +342,11 @@ for index, row in data.iterrows():
 actualact = list(data['future'])
 
 trainaccuracy = sum(1 for x,y in zip(predact,actualact) if x == y) / float(len(actualact))
-trainaccuracy
+print("Bag activity accuracy for train data "+ str(trainaccuracy))
+
 
 trainmae =  mean_absolute_error(predtime,actual_time_train)
-trainmae
+print("Bag time mean_absolute_error for train data "+ str(trainmae))
 
 predact = []
 predtime = []
@@ -364,7 +369,8 @@ for index, row in testdata.iterrows():
 actualact = list(testdata['future'])
 
 testaccuracy = sum(1 for x,y in zip(predact,actualact) if x == y) / float(len(actualact))
-testaccuracy
+print("Bag activity accuracy for test data "+ str(testaccuracy))
+
 
 testmae =  mean_absolute_error(predtime,actual_time_test)
-testmae
+print("Bag time accuracy for test data "+ str(testmae))
